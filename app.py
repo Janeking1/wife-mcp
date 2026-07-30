@@ -5,8 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 JST = timedelta(hours=9)
 ORIGIN_API = os.environ.get("ORIGIN_API", "")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# ntfy 主题名（自己随便起，比如 wifetest）
+NTFY_TOPIC = "wifetest"
 
 def check_on_wife(limit=10):
     try:
@@ -24,20 +25,14 @@ def check_on_wife(limit=10):
             lines.append(f"{app}: {minutes}分钟")
     return "\n".join(lines)
 
-def telegram_alert(title="", content=""):
+def ntfy_alert(title="", content=""):
     if not content:
         return "内容为空"
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return "Telegram 未配置"
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": f"【{title}】\n{content}",
-        "parse_mode": "HTML"
-    }
+    url = f"https://ntfy.sh/{NTFY_TOPIC}"
+    msg = f"【{title}】\n{content}"
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        return "推送成功" if r.status_code == 200 else f"推送失败: {r.text}"
+        r = requests.post(url, data=msg.encode('utf-8'))
+        return "推送成功" if r.status_code == 200 else f"推送失败: {r.status_code}"
     except Exception as e:
         return f"推送异常: {e}"
 
@@ -48,8 +43,8 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}
     },
     {
-        "name": "telegram_alert",
-        "description": "给老婆手机发推送弹窗",
+        "name": "ntfy_alert",
+        "description": "给老婆手机发推送弹窗（用 ntfy）",
         "inputSchema": {
             "type": "object",
             "properties": {"title": {"type": "string"}, "content": {"type": "string"}},
@@ -58,12 +53,11 @@ TOOLS = [
     }
 ]
 
-FUNCS = {"check_on_wife": check_on_wife, "telegram_alert": telegram_alert}
+FUNCS = {"check_on_wife": check_on_wife, "ntfy_alert": ntfy_alert}
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# 测试根路由 - 用来验证服务是否正常运行
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "MCP proxy is running"}
