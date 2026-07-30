@@ -2,7 +2,6 @@ import json, os, requests
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
 
 JST = timedelta(hours=9)
 ORIGIN_API = os.environ.get("ORIGIN_API", "")
@@ -64,6 +63,11 @@ FUNCS = {"check_on_wife": check_on_wife, "telegram_alert": telegram_alert}
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# 测试根路由 - 用来验证服务是否正常运行
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "MCP proxy is running"}
+
 @app.post("/mcp")
 async def mcp(req: Request):
     body = await req.json()
@@ -83,7 +87,3 @@ async def mcp(req: Request):
         return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": str(result)}]}}
     
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32600, "message": f"未知方法: {method}"}}
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
