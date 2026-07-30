@@ -1,81 +1,81 @@
-import sqlite3, os
+import json, os, requests
 from datetime import datetime, timedelta
-from pathlib import Path
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import uvicorn
 
-BASE_DIR = Path(__file__).parent
-DB_PATH = BASE_DIR / "records.db"
-AUTH_TOKEN = os.environ.get("AUTH_TOKEN", "LOVEwife")
+JST = timedelta(hours=9)
 
-def init_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            app_name TEXT NOT NULL,
-            event TEXT NOT NULL,
-            timestamp TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
+# 环境变量
+ORIGIN_API = os.environ.get("ORIGIN_API", "")
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "wifetest")
 
-init_db()
+def check_on_wife(limit=10):
+    if not ORIGIN_API:
+        return "错误：未配置 ORIGIN_API 环境变量"
+    try:
+        r = requests.get(f"{ORIGIN_API}/activity/summary", timeout=10)
+        data = r.json()
+    except Exception as e:
+        return f"查岗失败: {e}"
+    
+    apps = data.get("recent_apps", [])
+    ses = data.get("sessions", {})
+    lines = ["最近打开: " + ", ".join(apps) if apps else "暂无记录"]
+    if ses:
+        for app, seconds in sorted(ses.items(), key=lambda x: x[1], reverse=True):
+            minutes = seconds // 60
+            lines.append(f"{app}: {minutes}分钟")
+    return "\n".join(lines)
+
+def ntfy_alert(title="", content=""):
+    if not content:
+        return "内容为空"
+    url = f"https://ntfy.sh/{NTFY_TOPIC}"
+    msg = f"【{title}】\n{content}"
+    try:
+        r = requests.post(url, data=msg.encode('utf-8'))
+        return "推送成功" if r.status_code == 200 else f"推送失败: {r.status_code}"
+    except Exception as e:
+        return f"推送异常: {e}"
+
+TOOLS = [
+    {"name": "check_on_wife", "description": "查岗老婆的手机活动", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
+    {"name": "ntfy_alert", "description": "给老婆手机发推送弹窗", "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "content": {"type": "string"}}, "required": ["content"]}}
+]
+
+FUNCS = {"check_on_wife": check_on_wife, "ntfy_alert": ntfy_alert}
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-class ReportBody(BaseModel):
-    app_name: str
-    event: str
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "MCP proxy is running"}
 
-@app.post("/report")
-async def report(body: ReportBody, req: Request):
-    auth = req.headers.get("Authorization")
-    if auth != f"Bearer {AUTH_TOKEN}":
-        raise HTTPException(401, "Unauthorized")
-    now = datetime.now().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.execute("INSERT INTO records (app_name, event, timestamp) VALUES (?, ?, ?)", (body.app_name, body.event, now))
-    conn.commit()
-    conn.close()
-    return {"status": "ok"}
-
-@app.get("/ping")
-async def ping():
-    return "pong"
-
-@app.get("/activity/summary")
-async def summary():
+@app.post("/mcp")
+async def mcp(req: Request):
     try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cur = conn.cursor()
-        cur.execute("SELECT app_name FROM records ORDER BY id DESC LIMIT 5")
-        recent = [row[0] for row in cur.fetchall()]
-        cur.execute("SELECT app_name, event, timestamp FROM records ORDER BY id ASC")
-        rows = cur.fetchall()
-        conn.close()
+        body = await req.json()
+    except:
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Invalid JSON"}}
+    
+    method = body.get("method")
+    params = body.get("params") or {}
+    rid = body.get("id")
 
-        sessions = {}
-        opens = {}
-        for app, ev, ts in rows:
-            if ev == "open":
-                opens[app] = datetime.fromisoformat(ts)
-            elif ev == "close" and app in opens:
-                gap = int((datetime.fromisoformat(ts) - opens[app]).total_seconds())
-                sessions[app] = sessions.get(app, 0) + gap
-                del opens[app]
-        for app, ts in opens.items():
-            gap = int((datetime.now() - datetime.fromisoformat(ts)).total_seconds())
-            sessions[app] = sessions.get(app, 0) + gap
-
-        return {"recent_apps": recent, "sessions": sessions}
-    except Exception as e:
-        # 即使出错也返回空数据，不报 500
-        return {"recent_apps": [], "sessions": {}, "error": str(e)}
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    if method == "initialize":
+        return {"jsonrpc": "2.0", "id": rid, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "查岗MCP", "version": "1.0"}}}
+    if method == "tools/list":
+        return {"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}}
+    if method == "tools/call":
+        name = params.get("name")
+        args = params.get("arguments") or {}
+        if name not in FUNCS:
+            return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": "未知工具"}}
+        try:
+            result = FUNCS[name](**args)
+        except Exception as e:
+            return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": f"执行工具出错: {e}"}}
+        return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": str(result)}]}}
+    
+    return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32600, "message": f"未知方法: {method}"}}
