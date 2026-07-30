@@ -5,13 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 JST = timedelta(hours=9)
 
-# 环境变量
-ORIGIN_API = os.environ.get("ORIGIN_API", "")
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "wifetest")
+# 直接硬编码 Railway 后端地址（不需要在 Vercel 界面设置环境变量了）
+ORIGIN_API = "https://wife-received-production.up.railway.app"
+NTFY_TOPIC = "wifetest"
 
 def check_on_wife(limit=10):
-    if not ORIGIN_API:
-        return "错误：未配置 ORIGIN_API 环境变量"
     try:
         r = requests.get(f"{ORIGIN_API}/activity/summary", timeout=10)
         data = r.json()
