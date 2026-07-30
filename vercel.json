@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/index.py": {
-      "runtime": "python"
+      "runtime": "python3.9"
     }
   },
   "routes": [
