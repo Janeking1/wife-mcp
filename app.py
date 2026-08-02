@@ -77,3 +77,10 @@ async def mcp(req: Request):
         return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": str(result)}]}}
     
     return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32600, "message": f"未知方法: {method}"}}
+
+# ========== 新增：定时查岗触发入口 ==========
+@app.get("/cron/check_and_push")
+async def cron_check_and_push():
+    result = check_on_wife(limit=10)
+    push_result = ntfy_alert("📱 定时查岗", result)
+    return {"status": "ok", "message": result, "push": push_result}
